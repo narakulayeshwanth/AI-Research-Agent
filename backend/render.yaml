@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: ai-investment-agent-backend
+    env: node
+    plan: starter          # Free tier has 30s timeout — Starter needed for long analyses
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NVIDIA_API_KEY
+        sync: false        # Set this in Render dashboard
+      - key: NVIDIA_MODEL
+        value: meta/llama-3.3-70b-instruct
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: NEWS_API_KEY
+        sync: false
+      - key: ALPHA_VANTAGE_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false        # Set to your Vercel URL, e.g. https://your-app.vercel.app

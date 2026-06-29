@@ -1,0 +1,1 @@
+{"version":3,"file":"newsApi.d.ts","sourceRoot":"","sources":["../../src/services/newsApi.ts"],"names":[],"mappings":"AAGA,MAAM,WAAW,WAAW;IAC1B,KAAK,EAAE,MAAM,CAAC;IACd,WAAW,EAAE,MAAM,CAAC;IACpB,GAAG,EAAE,MAAM,CAAC;IACZ,WAAW,EAAE,MAAM,CAAC;IACpB,MAAM,EAAE,MAAM,CAAC;CAChB;AAkCD,wCAAwC;AACxC,eAAO,MAAM,iBAAiB,iEAI7B,CAAC"}
