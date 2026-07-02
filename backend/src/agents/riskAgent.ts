@@ -1,12 +1,33 @@
 import { getLLM } from "../lib/llm";
-import { RiskAnalysisSchema, type ResearchState } from "../types/investment";
+import { z } from "zod";
+import { type ResearchState } from "../types/investment";
+
+// Simpler intermediate schema — LLM returns a flat risks array, we map it to named keys
+const RiskItemLLMSchema = z.object({
+  category: z.enum([
+    "Industry Risk",
+    "Competition Risk",
+    "Regulatory Risk",
+    "Market Risk",
+    "Valuation Risk",
+  ]),
+  level: z.enum(["Low", "Medium", "High"]),
+  description: z.string(),
+  mitigants: z.string(),
+});
+
+const RiskOutputSchema = z.object({
+  risks: z.array(RiskItemLLMSchema).max(5),
+  overallRiskLevel: z.enum(["Low", "Medium", "High"]),
+  overallRiskSummary: z.string(),
+});
 
 export async function riskAgent(state: ResearchState): Promise<Partial<ResearchState>> {
   const { companyProfile: p, financialAnalysis: f, newsAnalysis: n } = state;
   if (!p) throw new Error("Risk agent requires company profile");
 
   const llm = getLLM({ temperature: 0.1 });
-  const structuredLLM = llm.withStructuredOutput(RiskAnalysisSchema);
+  const structuredLLM = llm.withStructuredOutput(RiskOutputSchema);
 
   const prompt = `You are a senior risk analyst. Evaluate investment risks for ${p.name} (${p.ticker}).
 
@@ -25,22 +46,47 @@ NEWS SENTIMENT:
 - Overall: ${n?.overallSentiment ?? "N/A"}
 - Key Negatives: ${n?.negativeItems?.join("; ") ?? "None"}
 
-TASK: Assess 5 risk dimensions. For each, provide:
-- category (exact names: "Industry Risk", "Competition Risk", "Regulatory Risk", "Market Risk", "Valuation Risk")
-- level: Low / Medium / High
+TASK: Return a "risks" array with exactly 5 items, one for each category below (in this exact order):
+1. "Industry Risk"
+2. "Competition Risk"
+3. "Regulatory Risk"
+4. "Market Risk"
+5. "Valuation Risk"
+
+For each risk provide:
+- category: one of the exact strings above
+- level: "Low", "Medium", or "High"
 - description: 2 sentences on the risk
 - mitigants: 1 sentence on what reduces this risk
 
-Then give:
-- overallRiskLevel: Low / Medium / High (weighted assessment)
-- overallRiskSummary: 2-sentence summary
+Also provide:
+- overallRiskLevel: "Low", "Medium", or "High"
+- overallRiskSummary: 2-sentence summary`;
 
-Sources for this analysis: ["Company Analysis", "News Sentiment", "Financial Metrics", "NVIDIA NIM LLM"]`;
+  const output = await structuredLLM.invoke(prompt);
 
-  const analysis = await structuredLLM.invoke(prompt);
+  // Map flat array to named keys expected by the rest of the graph
+  const findRisk = (cat: string) =>
+    output.risks.find((r) => r.category === cat) ?? {
+      category: cat,
+      level: "Medium" as const,
+      description: "Insufficient data to assess.",
+      mitigants: "Standard risk management practices apply.",
+    };
+
+  const riskAnalysis = {
+    industryRisk: findRisk("Industry Risk"),
+    competitionRisk: findRisk("Competition Risk"),
+    regulatoryRisk: findRisk("Regulatory Risk"),
+    marketRisk: findRisk("Market Risk"),
+    valuationRisk: findRisk("Valuation Risk"),
+    overallRiskLevel: output.overallRiskLevel,
+    overallRiskSummary: output.overallRiskSummary,
+    sources: ["Company Analysis", "News Sentiment", "Financial Metrics", "NVIDIA NIM LLM"],
+  };
 
   return {
-    riskAnalysis: analysis,
+    riskAnalysis,
     completedAgents: [...state.completedAgents, "risk"],
   };
 }

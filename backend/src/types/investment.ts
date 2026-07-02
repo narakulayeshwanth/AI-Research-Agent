@@ -107,11 +107,9 @@ export type RiskAnalysis = z.infer<typeof RiskAnalysisSchema>;
 export const BullBearAnalysisSchema = z.object({
   bullArguments: z
     .array(z.object({ title: z.string(), detail: z.string() }))
-    .min(3)
     .max(5),
   bearArguments: z
     .array(z.object({ title: z.string(), detail: z.string() }))
-    .min(3)
     .max(5),
   bullStrength: z.number().min(0).max(10),
   bearStrength: z.number().min(0).max(10),
@@ -146,8 +144,8 @@ export const AnalystMemoSchema = z.object({
   investmentRecommendation: z.string(),
   conclusion: z.string(),
   analystNote: z.string(),
-  dateGenerated: z.string(),
-  sources: z.array(z.string()),
+  dateGenerated: z.string().optional(), // set by code, not LLM
+  sources: z.array(z.string()).optional(), // set by code, not LLM
 });
 export type AnalystMemo = z.infer<typeof AnalystMemoSchema>;
 

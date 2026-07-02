@@ -65,20 +65,110 @@ export const fetchYahooFinanceData = withCache(
   900
 );
 
+/** Well-known company → ticker mapping for common searches (avoids API calls entirely) */
+const KNOWN_TICKERS: Record<string, string> = {
+  apple: "AAPL",
+  microsoft: "MSFT",
+  google: "GOOGL",
+  alphabet: "GOOGL",
+  amazon: "AMZN",
+  meta: "META",
+  facebook: "META",
+  nvidia: "NVDA",
+  tesla: "TSLA",
+  netflix: "NFLX",
+  "berkshire hathaway": "BRK-B",
+  "johnson & johnson": "JNJ",
+  "johnson and johnson": "JNJ",
+  jpmorgan: "JPM",
+  "jp morgan": "JPM",
+  visa: "V",
+  mastercard: "MA",
+  walmart: "WMT",
+  "procter & gamble": "PG",
+  "procter and gamble": "PG",
+  "united health": "UNH",
+  unitedhealth: "UNH",
+  exxon: "XOM",
+  "exxon mobil": "XOM",
+  chevron: "CVX",
+  "home depot": "HD",
+  "coca cola": "KO",
+  "coca-cola": "KO",
+  abbvie: "ABBV",
+  pfizer: "PFE",
+  merck: "MRK",
+  broadcom: "AVGO",
+  "eli lilly": "LLY",
+  costco: "COST",
+  salesforce: "CRM",
+  adobe: "ADBE",
+  qualcomm: "QCOM",
+  amd: "AMD",
+  intel: "INTC",
+  oracle: "ORCL",
+  ibm: "IBM",
+  paypal: "PYPL",
+  shopify: "SHOP",
+  "uber technologies": "UBER",
+  uber: "UBER",
+  lyft: "LYFT",
+  airbnb: "ABNB",
+  spotify: "SPOT",
+  twitter: "X",
+  snap: "SNAP",
+  pinterest: "PINS",
+  zoom: "ZM",
+  "zoom video": "ZM",
+  palantir: "PLTR",
+  coinbase: "COIN",
+  robinhood: "HOOD",
+  amc: "AMC",
+  gamestop: "GME",
+  boeing: "BA",
+  lockheed: "LMT",
+  raytheon: "RTX",
+  ford: "F",
+  "general motors": "GM",
+  toyota: "TM",
+  disney: "DIS",
+  comcast: "CMCSA",
+  "at&t": "T",
+  verizon: "VZ",
+  "t-mobile": "TMUS",
+  "bank of america": "BAC",
+  "wells fargo": "WFC",
+  citigroup: "C",
+  goldman: "GS",
+  "morgan stanley": "MS",
+};
+
 /** Search for ticker symbol from company name via Yahoo Finance search (still public) */
 async function _searchTicker(companyName: string): Promise<string | null> {
-  try {
-    // Direct ticker shortcut (e.g. user typed "NVDA" or "TSLA")
-    const upper = companyName.toUpperCase().trim();
-    if (/^[A-Z]{1,5}$/.test(upper)) return upper;
+  const upper = companyName.toUpperCase().trim();
+  const lower = companyName.toLowerCase().trim();
 
-    // Yahoo Finance search endpoint (still works without auth)
+  // 1. Direct ticker shortcut (e.g. user typed "NVDA" or "TSLA")
+  if (/^[A-Z]{1,5}$/.test(upper)) {
+    console.log(`[YahooFinance] Direct ticker: ${upper}`);
+    return upper;
+  }
+
+  // 2. Known company lookup (instant, no API call)
+  if (KNOWN_TICKERS[lower]) {
+    console.log(`[YahooFinance] Known ticker for "${companyName}": ${KNOWN_TICKERS[lower]}`);
+    return KNOWN_TICKERS[lower];
+  }
+
+  // 3. Yahoo Finance search (with generous timeout)
+  try {
+    console.log(`[YahooFinance] Searching Yahoo for: ${companyName}`);
     const { data } = await axios.get(
-      "https://query2.finance.yahoo.com/v1/finance/search",
+      "https://query1.finance.yahoo.com/v1/finance/search",
       {
         headers: HEADERS,
         params: { q: companyName, quotesCount: 5, newsCount: 0 },
-        timeout: 8000,
+        timeout: 15000, // increased from 8s to 15s
       }
     );
 
@@ -89,11 +179,42 @@ async function _searchTicker(companyName: string): Promise<string | null> {
         q.symbol &&
         !q.symbol.includes(".") // prefer US-listed
     );
-    return equity?.symbol ?? quotes[0]?.symbol ?? null;
+    const result = equity?.symbol ?? quotes[0]?.symbol ?? null;
+    if (result) {
+      console.log(`[YahooFinance] Found ticker: ${result}`);
+      return result;
+    }
   } catch (err: any) {
-    console.error("[YahooFinance] Search error:", err?.message);
-    return searchViaAlphaVantage(companyName);
+    console.warn(`[YahooFinance] query1 failed (${err?.message}), trying query2...`);
   }
+
+  // 4. Retry with query2 endpoint
+  try {
+    const { data } = await axios.get(
+      "https://query2.finance.yahoo.com/v1/finance/search",
+      {
+        headers: HEADERS,
+        params: { q: companyName, quotesCount: 5, newsCount: 0 },
+        timeout: 15000,
+      }
+    );
+
+    const quotes: any[] = data?.quotes ?? [];
+    const equity = quotes.find(
+      (q) => q.quoteType === "EQUITY" && q.symbol && !q.symbol.includes(".")
+    );
+    const result = equity?.symbol ?? quotes[0]?.symbol ?? null;
+    if (result) {
+      console.log(`[YahooFinance] Found ticker via query2: ${result}`);
+      return result;
+    }
+  } catch (err: any) {
+    console.warn(`[YahooFinance] query2 also failed: ${err?.message}`);
+  }
+
+  // 5. Alpha Vantage SYMBOL_SEARCH as last resort
+  console.log(`[YahooFinance] Falling back to Alpha Vantage symbol search for: ${companyName}`);
+  return searchViaAlphaVantage(companyName);
 }
 
 async function searchViaAlphaVantage(keywords: string): Promise<string | null> {
@@ -106,15 +227,24 @@ async function searchViaAlphaVantage(keywords: string): Promise<string | null> {
         keywords,
         apikey: apiKey,
       },
-      timeout: 8000,
+      timeout: 15000, // increased from 8s
     });
+
+    if (data?.Information || data?.Note) {
+      console.warn("[AlphaVantage] Rate limited on SYMBOL_SEARCH");
+      return null;
+    }
+
     const matches = data?.bestMatches ?? [];
     const equity = matches.find(
       (m: any) =>
         m["4. region"] === "United States" && m["3. type"] === "Equity"
     );
-    return equity?.["1. symbol"] ?? null;
-  } catch {
+    const result = equity?.["1. symbol"] ?? null;
+    if (result) console.log(`[AlphaVantage] Found ticker: ${result}`);
+    return result;
+  } catch (err: any) {
+    console.warn("[AlphaVantage] Symbol search error:", err?.message);
     return null;
   }
 }

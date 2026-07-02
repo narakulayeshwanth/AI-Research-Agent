@@ -63,6 +63,7 @@ analyzeRouter.post("/", async (req: Request, res: Response): Promise<void> => {
   } catch (err: unknown) {
     const message =
       err instanceof Error ? err.message : "Analysis failed. Please try again.";
+    console.error("[analyze] Pipeline error:", err);
     send("error", { success: false, error: message });
     res.end();
   }
