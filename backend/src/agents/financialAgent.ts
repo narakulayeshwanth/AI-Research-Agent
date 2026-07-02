@@ -1,4 +1,4 @@
-import { getLLM } from "../lib/llm";
+import { withStructuredOutputFallback } from "../lib/llm";
 import {
   calcGrowthScore,
   calcProfitabilityScore,
@@ -38,8 +38,6 @@ export async function financialAgent(state: ResearchState): Promise<Partial<Rese
   );
 
   // ── 2. LLM explains the scores (NOT calculates them) ──────────
-  const llm = getLLM({ temperature: 0.15 });
-  const structuredLLM = llm.withStructuredOutput(ReasoningSchema);
 
   const prompt = `You are a senior equity analyst. Explain the following pre-calculated financial scores for ${profile.name} (${profile.ticker}).
 Write 1–2 concise sentences per dimension. Be specific, reference the actual metrics.
@@ -59,7 +57,7 @@ KEY METRICS:
 
 Write professional, factual reasoning for each score. Then a 2-sentence overall summary.`;
 
-  const reasoning = await structuredLLM.invoke(prompt);
+  const reasoning = await withStructuredOutputFallback<typeof ReasoningSchema._type>(ReasoningSchema, prompt, { temperature: 0.15 });
 
   const analysis = FinancialAnalysisSchema.parse({
     growthScore,

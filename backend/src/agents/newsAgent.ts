@@ -1,4 +1,4 @@
-import { getLLM } from "../lib/llm";
+import { withStructuredOutputFallback } from "../lib/llm";
 import { fetchNewsArticles } from "../services/newsApi";
 import { NewsAnalysisSchema, type ResearchState } from "../types/investment";
 import { z } from "zod";
@@ -30,8 +30,6 @@ export async function newsAgent(state: ResearchState): Promise<Partial<ResearchS
     : "No recent news articles found.";
 
   // 2. LLM classifies and scores sentiment (structured output)
-  const llm = getLLM({ temperature: 0.1 });
-  const structuredLLM = llm.withStructuredOutput(NewsLLMOutputSchema);
 
   const prompt = `You are a financial news analyst. Analyze these recent news articles about ${profile.name} (${profile.ticker}).
 
@@ -50,7 +48,7 @@ TASKS:
 
 If no articles provided, give neutral scores of 5 and note limited data.`;
 
-  const result = await structuredLLM.invoke(prompt);
+  const result = await withStructuredOutputFallback<typeof NewsLLMOutputSchema._type>(NewsLLMOutputSchema, prompt, { temperature: 0.1 });
 
   // Merge classified metadata back with raw articles (URL, publishedAt, source)
   const enrichedArticles = articles.map((raw, i) => {

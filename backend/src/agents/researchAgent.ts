@@ -1,4 +1,4 @@
-import { getLLM } from "../lib/llm";
+import { withStructuredOutputFallback } from "../lib/llm";
 import { searchTicker } from "../services/yahooFinance";
 import { fetchAlphaVantageData } from "../services/alphaVantage";
 import { formatCurrency } from "../lib/scoring";
@@ -47,8 +47,6 @@ export async function researchAgent(
   const avHasData = !!(av.name && av.name !== ticker && av.marketCap);
 
   // ── 3. LLM enrichment + financial fallback ────────────────────
-  const llm = getLLM({ temperature: 0.1 });
-  const structuredLLM = llm.withStructuredOutput(LLMEnrichSchema);
 
   const prompt = `You are a financial research analyst. Provide structured information about the company with ticker: ${ticker} (user searched: "${company}").
 
@@ -95,7 +93,7 @@ FINANCIAL ESTIMATES (provide even if approximate — these power the scoring eng
 
 Be accurate with known companies. Use null only for genuinely unknown metrics.`;
 
-  const enriched = await structuredLLM.invoke(prompt);
+  const enriched = await withStructuredOutputFallback<typeof LLMEnrichSchema._type>(LLMEnrichSchema, prompt, { temperature: 0.1 });
 
   // ── 4. Merge: prefer Alpha Vantage real data, fall back to LLM estimates ──
   const marketCap = avHasData && av.marketCap

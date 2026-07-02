@@ -1,12 +1,10 @@
-import { getLLM } from "../lib/llm";
+import { withStructuredOutputFallback } from "../lib/llm";
 import { BullBearAnalysisSchema, type ResearchState } from "../types/investment";
 
 export async function bullBearAgent(state: ResearchState): Promise<Partial<ResearchState>> {
   const { companyProfile: p, financialAnalysis: f, newsAnalysis: n, riskAnalysis: r } = state;
   if (!p) throw new Error("BullBear agent requires company profile");
 
-  const llm = getLLM({ temperature: 0.2 });
-  const structuredLLM = llm.withStructuredOutput(BullBearAnalysisSchema);
 
   const prompt = `You are a seasoned equity research analyst writing a bull vs bear investment debate for ${p.name} (${p.ticker}).
 
@@ -43,7 +41,7 @@ TASK:
 
 Be analytical, not generic. Reference actual metrics.`;
 
-  const analysis = await structuredLLM.invoke(prompt);
+  const analysis = await withStructuredOutputFallback<typeof BullBearAnalysisSchema._type>(BullBearAnalysisSchema, prompt, { temperature: 0.2 });
 
   return {
     bullBearAnalysis: analysis,

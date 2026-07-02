@@ -1,12 +1,10 @@
-import { getLLM } from "../lib/llm";
+import { withStructuredOutputFallback } from "../lib/llm";
 import { InvestmentDecisionSchema, type ResearchState } from "../types/investment";
 
 export async function decisionAgent(state: ResearchState): Promise<Partial<ResearchState>> {
   const { companyProfile: p, financialAnalysis: f, newsAnalysis: n, riskAnalysis: r, bullBearAnalysis: bb } = state;
   if (!p || !f) throw new Error("Decision agent requires complete prior analysis");
 
-  const llm = getLLM({ temperature: 0.05 }); // very low temp for consistent decisions
-  const structuredLLM = llm.withStructuredOutput(InvestmentDecisionSchema);
 
   const prompt = `You are the head of equity research making a final investment decision for ${p.name} (${p.ticker}).
 
@@ -48,7 +46,7 @@ OUTPUT REQUIRED:
 
 IMPORTANT: Also include a "whyNot" field — 2–4 reasons why someone might NOT follow this recommendation (counterarguments to your own decision). Add it to keyFactors prefixed with "⚠️ Risk:".`;
 
-  const decision = await structuredLLM.invoke(prompt);
+  const decision = await withStructuredOutputFallback<typeof InvestmentDecisionSchema._type>(InvestmentDecisionSchema, prompt, { temperature: 0.05 });
 
   return {
     investmentDecision: decision,

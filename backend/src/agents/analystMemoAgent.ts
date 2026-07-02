@@ -1,12 +1,10 @@
-import { getLLM } from "../lib/llm";
+import { withStructuredOutputFallback } from "../lib/llm";
 import { AnalystMemoSchema, type ResearchState } from "../types/investment";
 
 export async function analystMemoAgent(state: ResearchState): Promise<Partial<ResearchState>> {
   const { companyProfile: p, financialAnalysis: f, newsAnalysis: n, riskAnalysis: r, investmentDecision: d } = state;
   if (!p || !f || !d) throw new Error("Analyst memo requires complete analysis");
 
-  const llm = getLLM({ temperature: 0.3 }); // slightly higher temp for professional writing quality
-  const structuredLLM = llm.withStructuredOutput(AnalystMemoSchema);
 
   const dateStr = new Date().toLocaleDateString("en-US", {
     year: "numeric", month: "long", day: "numeric"
@@ -36,7 +34,7 @@ Style: Professional, concise, no fluff. Write as if this will be read by a hedge
 Date: ${dateStr}
 Sources: ["Yahoo Finance", "Alpha Vantage", "NewsAPI.org", "NVIDIA NIM LLM", "Formula-based Scoring Engine"]`;
 
-  const memo = await structuredLLM.invoke(prompt);
+  const memo = await withStructuredOutputFallback<typeof AnalystMemoSchema._type>(AnalystMemoSchema, prompt, { temperature: 0.3 });
 
   return {
     analystMemo: {

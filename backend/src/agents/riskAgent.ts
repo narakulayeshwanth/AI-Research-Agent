@@ -1,4 +1,4 @@
-import { getLLM } from "../lib/llm";
+import { withStructuredOutputFallback } from "../lib/llm";
 import { z } from "zod";
 import { type ResearchState } from "../types/investment";
 
@@ -26,8 +26,7 @@ export async function riskAgent(state: ResearchState): Promise<Partial<ResearchS
   const { companyProfile: p, financialAnalysis: f, newsAnalysis: n } = state;
   if (!p) throw new Error("Risk agent requires company profile");
 
-  const llm = getLLM({ temperature: 0.1 });
-  const structuredLLM = llm.withStructuredOutput(RiskOutputSchema);
+  const structuredLLM = { invoke: (p: string) => withStructuredOutputFallback<typeof RiskOutputSchema._type>(RiskOutputSchema, p, { temperature: 0.1 }) };
 
   const prompt = `You are a senior risk analyst. Evaluate investment risks for ${p.name} (${p.ticker}).
 
