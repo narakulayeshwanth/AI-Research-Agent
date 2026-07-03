@@ -16,12 +16,21 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "http://localhost:3000")
   .map((o) => o.trim())
   .filter(Boolean);
 
+// Regex patterns for dynamic origins (e.g. Vercel preview deployments)
+const allowedOriginPatterns: RegExp[] = [
+  /^https:\/\/.*\.vercel\.app$/,       // all Vercel preview & production deployments
+  /^http:\/\/localhost(:\d+)?$/,        // local dev on any port
+];
+
 app.use(
   cors({
     origin: (origin, callback) => {
       // Allow requests with no origin (e.g. curl, Render health checks)
       if (!origin) return callback(null, true);
+      // Check exact match list
       if (allowedOrigins.includes(origin)) return callback(null, true);
+      // Check regex patterns (covers Vercel preview URLs)
+      if (allowedOriginPatterns.some((re) => re.test(origin))) return callback(null, true);
       callback(new Error(`CORS: origin ${origin} not allowed`));
     },
     methods: ["GET", "POST", "OPTIONS"],
