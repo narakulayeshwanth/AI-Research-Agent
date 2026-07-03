@@ -4,7 +4,7 @@
   "description": "Express.js backend for AI Investment Research Agent — runs on Render",
   "main": "dist/index.js",
   "engines": {
-    "node": "20.x"
+    "node": "22.x"
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",

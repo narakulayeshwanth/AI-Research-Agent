@@ -1,7 +1,7 @@
 /**
- * getLLM() — Returns NVIDIA NIM as primary LLM, OpenAI as fallback.
- * getWithFallbackLLM() — Returns a RunnableWithFallbacks that automatically
- * switches to OpenAI when NVIDIA returns a 429 rate-limit error.
+ * LLM provider — OpenAI (gpt-4o-mini) is PRIMARY, NVIDIA NIM is FALLBACK.
+ * OpenAI is faster and more reliable for structured output on production.
+ * NVIDIA is used as fallback when OpenAI is unavailable or fails.
  */
 import { ChatOpenAI } from "@langchain/openai";
 
@@ -10,9 +10,31 @@ interface LLMOptions {
   maxTokens?: number;
 }
 
+/** Wrap any promise with a hard timeout that rejects after `ms` milliseconds */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`[LLM] ${label} timed out after ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
+function getOpenAILLM(options: LLMOptions = {}): ChatOpenAI | null {
+  if (!process.env.OPENAI_API_KEY) return null;
+  const { temperature = 0.1, maxTokens = 2048 } = options;
+  return new ChatOpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+    model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+    temperature,
+    maxTokens,
+    timeout: 45000, // 45s client-side timeout
+  });
+}
+
 function getNvidiaLLM(options: LLMOptions = {}): ChatOpenAI | null {
   if (!process.env.NVIDIA_API_KEY) return null;
-  const { temperature = 0.1, maxTokens = 4096 } = options;
+  const { temperature = 0.1, maxTokens = 2048 } = options;
   return new ChatOpenAI({
     apiKey: process.env.NVIDIA_API_KEY,
     configuration: {
@@ -21,68 +43,29 @@ function getNvidiaLLM(options: LLMOptions = {}): ChatOpenAI | null {
     model: process.env.NVIDIA_MODEL ?? "meta/llama-3.3-70b-instruct",
     temperature,
     maxTokens,
-    timeout: 30000, // 30s — fall back to OpenAI faster if NVIDIA hangs
+    timeout: 45000,
   });
 }
 
-function getOpenAILLM(options: LLMOptions = {}): ChatOpenAI | null {
-  if (!process.env.OPENAI_API_KEY) return null;
-  const { temperature = 0.1, maxTokens = 4096 } = options;
-  return new ChatOpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-    model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
-    temperature,
-    maxTokens,
-    timeout: 30000, // 30s per LLM call
-  });
-}
-
-/** Returns primary LLM (NVIDIA if available, else OpenAI). No auto-fallback. */
+/** Returns primary LLM (OpenAI if available, else NVIDIA). No auto-fallback. */
 export function getLLM(options: LLMOptions = {}): ChatOpenAI {
-  const nvidia = getNvidiaLLM(options);
-  if (nvidia) return nvidia;
-
   const openai = getOpenAILLM(options);
-  if (openai) {
-    console.warn("[LLM] NVIDIA_API_KEY not set — using OpenAI.");
-    return openai;
+  if (openai) return openai;
+
+  const nvidia = getNvidiaLLM(options);
+  if (nvidia) {
+    console.warn("[LLM] OPENAI_API_KEY not set — using NVIDIA NIM.");
+    return nvidia;
   }
 
   throw new Error(
-    "No LLM provider configured. Set NVIDIA_API_KEY or OPENAI_API_KEY in environment variables."
+    "No LLM provider configured. Set OPENAI_API_KEY or NVIDIA_API_KEY in environment variables."
   );
 }
 
 /**
- * isRateLimitError — checks if an error is a 429 / rate limit response.
- */
-function shouldFallbackToOpenAI(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const e = err as Record<string, unknown>;
-  // Rate limit errors (429)
-  if (e["status"] === 429 || e["statusCode"] === 429) return true;
-  const msg = String(e["message"] ?? "").toLowerCase();
-  return (
-    msg.includes("429") ||
-    msg.includes("rate limit") ||
-    msg.includes("rate_limit") ||
-    msg.includes("too many requests") ||
-    msg.includes("model_rate_limit") ||
-    msg.includes("timeout") ||
-    msg.includes("timed out") ||
-    msg.includes("econnreset") ||
-    msg.includes("econnrefused") ||
-    msg.includes("socket hang up") ||
-    msg.includes("network") ||
-    msg.includes("502") ||
-    msg.includes("503") ||
-    msg.includes("504")
-  );
-}
-
-/**
- * withStructuredOutputFallback — wraps an LLM invoke with automatic OpenAI
- * fallback when NVIDIA returns a 429 rate-limit error.
+ * withStructuredOutputFallback — tries OpenAI first, falls back to NVIDIA.
+ * Uses Promise.race as a hard safety timeout (50s) in addition to client timeout.
  *
  * Usage (drop-in for llm.withStructuredOutput(schema).invoke(prompt)):
  *   await withStructuredOutputFallback(schema, prompt, options)
@@ -93,35 +76,48 @@ export async function withStructuredOutputFallback(
   options: LLMOptions = {}
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<any> {
-  const nvidia = getNvidiaLLM(options);
   const openai = getOpenAILLM(options);
+  const nvidia = getNvidiaLLM(options);
 
-  // Try NVIDIA first
-  if (nvidia) {
+  // ── Try OpenAI first (primary) ───────────────────────────────
+  if (openai) {
     try {
-      const result = await nvidia.withStructuredOutput(schema).invoke(prompt);
+      console.log("[LLM] Calling OpenAI (primary)...");
+      const result = await withTimeout(
+        openai.withStructuredOutput(schema).invoke(prompt),
+        50000, // 50s hard safety timeout (above client 45s)
+        "OpenAI"
+      );
+      console.log("[LLM] OpenAI responded OK.");
       return result;
     } catch (err) {
-      if (shouldFallbackToOpenAI(err) && openai) {
-        console.warn(
-          `[LLM] NVIDIA failed (${(err as Error)?.message?.slice(0, 80)}) — falling back to OpenAI.`
-        );
-        // fall through to OpenAI below
-      } else if (!openai) {
-        throw err; // no fallback available
+      const msg = (err as Error)?.message ?? "";
+      if (nvidia) {
+        console.warn(`[LLM] OpenAI failed (${msg.slice(0, 80)}) — falling back to NVIDIA NIM.`);
+        // fall through to NVIDIA below
       } else {
-        console.warn(`[LLM] NVIDIA error — trying OpenAI fallback: ${(err as Error)?.message?.slice(0, 80)}`);
-        // fall through to OpenAI for any error when fallback exists
+        throw err; // no fallback
       }
     }
   }
 
-  // Use OpenAI (either as fallback or primary)
-  if (openai) {
-    return openai.withStructuredOutput(schema).invoke(prompt);
+  // ── Fallback: NVIDIA NIM ─────────────────────────────────────
+  if (nvidia) {
+    try {
+      console.log("[LLM] Calling NVIDIA NIM (fallback)...");
+      const result = await withTimeout(
+        nvidia.withStructuredOutput(schema).invoke(prompt),
+        50000,
+        "NVIDIA NIM"
+      );
+      console.log("[LLM] NVIDIA NIM responded OK.");
+      return result;
+    } catch (err) {
+      throw err;
+    }
   }
 
   throw new Error(
-    "No LLM provider available. Set NVIDIA_API_KEY or OPENAI_API_KEY."
+    "No LLM provider available. Set OPENAI_API_KEY or NVIDIA_API_KEY."
   );
 }
