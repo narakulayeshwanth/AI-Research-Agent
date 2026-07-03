@@ -41,7 +41,7 @@ TASK:
 
 Be analytical, not generic. Reference actual metrics.`;
 
-  const analysis = await withStructuredOutputFallback<typeof BullBearAnalysisSchema._type>(BullBearAnalysisSchema, prompt, { temperature: 0.2 });
+  const analysis = await withStructuredOutputFallback(BullBearAnalysisSchema, prompt, { temperature: 0.2 });
 
   return {
     bullBearAnalysis: analysis,

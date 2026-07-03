@@ -93,7 +93,7 @@ FINANCIAL ESTIMATES (provide even if approximate — these power the scoring eng
 
 Be accurate with known companies. Use null only for genuinely unknown metrics.`;
 
-  const enriched = await withStructuredOutputFallback<typeof LLMEnrichSchema._type>(LLMEnrichSchema, prompt, { temperature: 0.1 });
+  const enriched = await withStructuredOutputFallback(LLMEnrichSchema, prompt, { temperature: 0.1 });
 
   // ── 4. Merge: prefer Alpha Vantage real data, fall back to LLM estimates ──
   const marketCap = avHasData && av.marketCap

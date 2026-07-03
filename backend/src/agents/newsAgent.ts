@@ -48,7 +48,7 @@ TASKS:
 
 If no articles provided, give neutral scores of 5 and note limited data.`;
 
-  const result = await withStructuredOutputFallback<typeof NewsLLMOutputSchema._type>(NewsLLMOutputSchema, prompt, { temperature: 0.1 });
+  const result = await withStructuredOutputFallback(NewsLLMOutputSchema, prompt, { temperature: 0.1 });
 
   // Merge classified metadata back with raw articles (URL, publishedAt, source)
   const enrichedArticles = articles.map((raw, i) => {

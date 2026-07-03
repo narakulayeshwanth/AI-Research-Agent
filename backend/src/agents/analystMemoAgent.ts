@@ -34,7 +34,7 @@ Style: Professional, concise, no fluff. Write as if this will be read by a hedge
 Date: ${dateStr}
 Sources: ["Yahoo Finance", "Alpha Vantage", "NewsAPI.org", "NVIDIA NIM LLM", "Formula-based Scoring Engine"]`;
 
-  const memo = await withStructuredOutputFallback<typeof AnalystMemoSchema._type>(AnalystMemoSchema, prompt, { temperature: 0.3 });
+  const memo = await withStructuredOutputFallback(AnalystMemoSchema, prompt, { temperature: 0.3 });
 
   return {
     analystMemo: {

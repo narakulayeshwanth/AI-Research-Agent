@@ -76,11 +76,12 @@ function isRateLimitError(err: unknown): boolean {
  * Usage (drop-in for llm.withStructuredOutput(schema).invoke(prompt)):
  *   await withStructuredOutputFallback(schema, prompt, options)
  */
-export async function withStructuredOutputFallback<T>(
+export async function withStructuredOutputFallback(
   schema: Parameters<ChatOpenAI["withStructuredOutput"]>[0],
   prompt: string,
   options: LLMOptions = {}
-): Promise<T> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<any> {
   const nvidia = getNvidiaLLM(options);
   const openai = getOpenAILLM(options);
 
@@ -88,7 +89,7 @@ export async function withStructuredOutputFallback<T>(
   if (nvidia) {
     try {
       const result = await nvidia.withStructuredOutput(schema).invoke(prompt);
-      return result as T;
+      return result;
     } catch (err) {
       if (isRateLimitError(err) && openai) {
         console.warn(
@@ -103,7 +104,7 @@ export async function withStructuredOutputFallback<T>(
 
   // Use OpenAI (either as fallback or primary)
   if (openai) {
-    return openai.withStructuredOutput(schema).invoke(prompt) as Promise<T>;
+    return openai.withStructuredOutput(schema).invoke(prompt);
   }
 
   throw new Error(

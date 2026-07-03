@@ -26,7 +26,7 @@ export async function riskAgent(state: ResearchState): Promise<Partial<ResearchS
   const { companyProfile: p, financialAnalysis: f, newsAnalysis: n } = state;
   if (!p) throw new Error("Risk agent requires company profile");
 
-  const structuredLLM = { invoke: (p: string) => withStructuredOutputFallback<typeof RiskOutputSchema._type>(RiskOutputSchema, p, { temperature: 0.1 }) };
+  const structuredLLM = { invoke: (p: string) => withStructuredOutputFallback(RiskOutputSchema, p, { temperature: 0.1 }) };
 
   const prompt = `You are a senior risk analyst. Evaluate investment risks for ${p.name} (${p.ticker}).
 
@@ -65,8 +65,10 @@ Also provide:
   const output = await structuredLLM.invoke(prompt);
 
   // Map flat array to named keys expected by the rest of the graph
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const findRisk = (cat: string) =>
-    output.risks.find((r) => r.category === cat) ?? {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (output.risks as any[]).find((r: any) => r.category === cat) ?? {
       category: cat,
       level: "Medium" as const,
       description: "Insufficient data to assess.",

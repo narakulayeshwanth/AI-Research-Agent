@@ -46,7 +46,7 @@ OUTPUT REQUIRED:
 
 IMPORTANT: Also include a "whyNot" field — 2–4 reasons why someone might NOT follow this recommendation (counterarguments to your own decision). Add it to keyFactors prefixed with "⚠️ Risk:".`;
 
-  const decision = await withStructuredOutputFallback<typeof InvestmentDecisionSchema._type>(InvestmentDecisionSchema, prompt, { temperature: 0.05 });
+  const decision = await withStructuredOutputFallback(InvestmentDecisionSchema, prompt, { temperature: 0.05 });
 
   return {
     investmentDecision: decision,

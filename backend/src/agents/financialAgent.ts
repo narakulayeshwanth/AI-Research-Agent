@@ -57,7 +57,7 @@ KEY METRICS:
 
 Write professional, factual reasoning for each score. Then a 2-sentence overall summary.`;
 
-  const reasoning = await withStructuredOutputFallback<typeof ReasoningSchema._type>(ReasoningSchema, prompt, { temperature: 0.15 });
+  const reasoning = await withStructuredOutputFallback(ReasoningSchema, prompt, { temperature: 0.15 });
 
   const analysis = FinancialAnalysisSchema.parse({
     growthScore,
