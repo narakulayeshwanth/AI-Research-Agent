@@ -5,46 +5,19 @@ export async function decisionAgent(state: ResearchState): Promise<Partial<Resea
   const { companyProfile: p, financialAnalysis: f, newsAnalysis: n, riskAnalysis: r, bullBearAnalysis: bb } = state;
   if (!p || !f) throw new Error("Decision agent requires complete prior analysis");
 
+  const prompt = `Investment decision for ${p.name} (${p.ticker}).
+Financial score: ${f.overallScore}/10. News: ${n?.overallSentiment ?? "neutral"}. Risk: ${r?.overallRiskLevel ?? "Medium"}. Bull strength: ${bb?.bullStrength ?? 5}/10. Bear strength: ${bb?.bearStrength ?? 5}/10.
+${f.overallSummary}
 
-  const prompt = `You are the head of equity research making a final investment decision for ${p.name} (${p.ticker}).
+Rules: INVEST if score≥7 and risk≤Medium. PASS if score<4 or risk=High. Otherwise HOLD.
 
-SYNTHESIZE ALL AGENT OUTPUTS:
-
-FINANCIAL ANALYSIS:
-- Overall Score: ${f.overallScore}/10 (weighted: Growth×30% + Profit×25% + Valuation×20% + Strength×25%)
-- Growth: ${f.growthScore}/10 | Profitability: ${f.profitabilityScore}/10 | Valuation: ${f.valuationScore}/10 | Strength: ${f.financialStrengthScore}/10
-- ${f.overallSummary}
-
-NEWS SENTIMENT: ${n?.overallSentiment ?? "neutral"} (Positive: ${n?.positiveSentimentScore ?? 5}/10, Negative: ${n?.negativeSentimentScore ?? 5}/10)
-- ${n?.sentimentSummary ?? "Limited news data available."}
-
-RISK LEVEL: Overall ${r?.overallRiskLevel ?? "Medium"}
-- ${r?.overallRiskSummary ?? "Standard market risks apply."}
-
-BULL STRENGTH: ${bb?.bullStrength ?? 5}/10
-BEAR STRENGTH: ${bb?.bearStrength ?? 5}/10
-
-Key Bull Arguments:
-${bb?.bullArguments?.map(a => `• ${a.title}: ${a.detail}`).join("\n") ?? "N/A"}
-
-Key Bear Arguments:
-${bb?.bearArguments?.map(a => `• ${a.title}: ${a.detail}`).join("\n") ?? "N/A"}
-
-DECISION CRITERIA:
-- INVEST: Strong financials (score ≥7), positive/neutral sentiment, manageable risk, bull case dominates
-- HOLD: Mixed signals, moderate financials (score 4–7), balanced bull/bear, medium risk
-- PASS: Weak financials (score <4), negative sentiment, high risk, bear case dominates
-
-OUTPUT REQUIRED:
-1. recommendation: INVEST, HOLD, or PASS
-2. confidence: 0–100 (your conviction level)
-3. reasoning: 3–4 sentence explanation referencing specific metrics
-4. keyFactors: 3–5 bullet-point factors that drove the decision
-5. timeHorizon: suggested investment horizon (e.g., "12–18 months", "Long-term (3–5 years)")
-6. targetPrice: analyst target price estimate if applicable, else omit
-7. sources: ["Financial Analysis", "News Sentiment", "Risk Assessment", "Bull-Bear Analysis", "NVIDIA NIM LLM"]
-
-IMPORTANT: Also include a "whyNot" field — 2–4 reasons why someone might NOT follow this recommendation (counterarguments to your own decision). Add it to keyFactors prefixed with "⚠️ Risk:".`;
+Return:
+- recommendation: INVEST, HOLD, or PASS
+- confidence: 0-100
+- reasoning: 2-3 sentences
+- keyFactors: 3-4 short bullet points
+- timeHorizon: e.g. "12-18 months"
+- sources: ["Financial Analysis","News Sentiment","Risk Assessment","Bull-Bear Analysis","NVIDIA NIM LLM"]`;
 
   const decision = await withStructuredOutputFallback(InvestmentDecisionSchema, prompt, { temperature: 0.05 });
 

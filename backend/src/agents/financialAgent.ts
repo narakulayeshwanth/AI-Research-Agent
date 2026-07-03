@@ -10,64 +10,41 @@ import {
 import { FinancialAnalysisSchema, type ResearchState } from "../types/investment";
 import { z } from "zod";
 
-// LLM only provides reasoning text — scores come from formula engine
+// Minimal schema — 2 fields only
 const ReasoningSchema = z.object({
-  growthReasoning: z.string(),
-  profitabilityReasoning: z.string(),
-  valuationReasoning: z.string(),
-  financialStrengthReasoning: z.string(),
-  overallSummary: z.string(),
+  scoresSummary: z.string().describe("2 sentences explaining the financial scores"),
+  overallSummary: z.string().describe("1 sentence overall financial assessment"),
 });
 
 export async function financialAgent(state: ResearchState): Promise<Partial<ResearchState>> {
   const profile = state.companyProfile!;
 
-  // ── 1. Deterministic formula scoring ──────────────────────────
+  // ── 1. Deterministic formula scoring (no LLM needed) ──────────
   const growthScore = calcGrowthScore(profile.revenueGrowthPct);
   const profitabilityScore = calcProfitabilityScore(profile.profitMarginPct);
   const valuationScore = calcValuationScore(profile.peRatio, 25);
-  const financialStrengthScore = calcFinancialStrengthScore(
-    profile.debtToEquity,
-    profile.currentRatio
-  );
-  const overallScore = calcOverallFinancialScore(
-    growthScore,
-    profitabilityScore,
-    valuationScore,
-    financialStrengthScore
-  );
+  const financialStrengthScore = calcFinancialStrengthScore(profile.debtToEquity, profile.currentRatio);
+  const overallScore = calcOverallFinancialScore(growthScore, profitabilityScore, valuationScore, financialStrengthScore);
 
-  // ── 2. LLM explains the scores (NOT calculates them) ──────────
+  // ── 2. LLM writes a brief summary only ────────────────────────
+  const prompt = `Financial scores for ${profile.name} (${profile.ticker}):
+Growth ${growthScore}/10 (rev growth ${profile.revenueGrowthPct?.toFixed(1) ?? "N/A"}%), Profitability ${profitabilityScore}/10 (margin ${profile.profitMarginPct?.toFixed(1) ?? "N/A"}%), Valuation ${valuationScore}/10 (P/E ${profile.peRatio?.toFixed(1) ?? "N/A"}x), Strength ${financialStrengthScore}/10, Overall ${overallScore}/10.
+Write scoresSummary (2 sentences explaining what these scores mean) and overallSummary (1 sentence conclusion).`;
 
-  const prompt = `You are a senior equity analyst. Explain the following pre-calculated financial scores for ${profile.name} (${profile.ticker}).
-Write 1–2 concise sentences per dimension. Be specific, reference the actual metrics.
+  const reasoning = await withStructuredOutputFallback(ReasoningSchema, prompt, { temperature: 0.1 });
 
-SCORES (already computed, do not change):
-- Growth Score: ${growthScore}/10 (Revenue Growth: ${profile.revenueGrowthPct?.toFixed(1) ?? "N/A"}%)
-- Profitability Score: ${profitabilityScore}/10 (Net Margin: ${profile.profitMarginPct?.toFixed(1) ?? "N/A"}%)
-- Valuation Score: ${valuationScore}/10 (P/E: ${profile.peRatio?.toFixed(1) ?? "N/A"}x)
-- Financial Strength Score: ${financialStrengthScore}/10 (D/E: ${profile.debtToEquity?.toFixed(2) ?? "N/A"}, Current Ratio: ${profile.currentRatio?.toFixed(2) ?? "N/A"})
-- Overall Score: ${overallScore}/10
-
-KEY METRICS:
-- Market Cap: ${profile.marketCapFormatted}
-- Revenue: ${profile.revenueFormatted}
-- Net Income: ${profile.netIncomeFormatted}
-- Sector: ${profile.sector}
-
-Write professional, factual reasoning for each score. Then a 2-sentence overall summary.`;
-
-  const reasoning = await withStructuredOutputFallback(ReasoningSchema, prompt, { temperature: 0.15 });
+  // Build per-score reasoning from the single summary
+  const perScore = reasoning.scoresSummary;
 
   const analysis = FinancialAnalysisSchema.parse({
     growthScore,
-    growthReasoning: reasoning.growthReasoning,
+    growthReasoning: perScore,
     profitabilityScore,
-    profitabilityReasoning: reasoning.profitabilityReasoning,
+    profitabilityReasoning: perScore,
     valuationScore,
-    valuationReasoning: reasoning.valuationReasoning,
+    valuationReasoning: perScore,
     financialStrengthScore,
-    financialStrengthReasoning: reasoning.financialStrengthReasoning,
+    financialStrengthReasoning: perScore,
     overallScore,
     overallSummary: reasoning.overallSummary,
     keyMetrics: [
@@ -81,7 +58,7 @@ Write professional, factual reasoning for each score. Then a 2-sentence overall 
       { label: "Current Ratio", value: profile.currentRatio != null ? profile.currentRatio.toFixed(2) : "N/A" },
       { label: "Employees", value: profile.employees != null ? profile.employees.toLocaleString() : "N/A" },
     ],
-    sources: ["Alpha Vantage", "Formula Engine", "NVIDIA NIM LLM"],
+    sources: ["Formula Engine", "NVIDIA NIM LLM"],
   });
 
   return {

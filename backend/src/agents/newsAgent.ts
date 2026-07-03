@@ -3,18 +3,14 @@ import { fetchNewsArticles } from "../services/newsApi";
 import { NewsAnalysisSchema, type ResearchState } from "../types/investment";
 import { z } from "zod";
 
+// Minimal schema — no per-article classification (saves huge token generation)
 const NewsLLMOutputSchema = z.object({
-  classifiedArticles: z.array(z.object({
-    title: z.string(),
-    summary: z.string(),
-    sentiment: z.enum(["positive", "negative", "neutral"]),
-  })),
-  positiveItems: z.array(z.string()).max(5),
-  negativeItems: z.array(z.string()).max(5),
-  positiveSentimentScore: z.number().min(0).max(10),
-  negativeSentimentScore: z.number().min(0).max(10),
+  positiveItems: z.array(z.string()).max(3).describe("Up to 3 positive news points"),
+  negativeItems: z.array(z.string()).max(3).describe("Up to 3 negative news points"),
+  positiveSentimentScore: z.number().min(0).max(10).describe("Positive sentiment 0-10"),
+  negativeSentimentScore: z.number().min(0).max(10).describe("Negative sentiment 0-10"),
   overallSentiment: z.enum(["bullish", "bearish", "neutral"]),
-  sentimentSummary: z.string(),
+  sentimentSummary: z.string().describe("1-2 sentences summarizing the news sentiment"),
 });
 
 export async function newsAgent(state: ResearchState): Promise<Partial<ResearchState>> {
@@ -24,43 +20,35 @@ export async function newsAgent(state: ResearchState): Promise<Partial<ResearchS
   const articles = await fetchNewsArticles(profile.name, profile.ticker);
 
   const articleText = articles.length > 0
-    ? articles.map((a, i) =>
-        `[${i + 1}] "${a.title}" — ${a.description?.slice(0, 150) ?? "No description"} (${a.source}, ${new Date(a.publishedAt).toLocaleDateString()})`
+    ? articles.slice(0, 5).map((a, i) =>
+        `[${i + 1}] "${a.title}" (${a.source})`
       ).join("\n")
-    : "No recent news articles found.";
+    : "No recent news found.";
 
-  // 2. LLM classifies and scores sentiment (structured output)
-
-  const prompt = `You are a financial news analyst. Analyze these recent news articles about ${profile.name} (${profile.ticker}).
-
-ARTICLES:
+  // 2. LLM sentiment analysis — minimal output
+  const prompt = `News analyst for ${profile.name} (${profile.ticker}). Recent headlines:
 ${articleText}
 
-TASKS:
-1. Classify each article as positive, negative, or neutral for investors
-2. Write a 1-sentence summary for each article
-3. List up to 5 key positive developments (product launches, revenue growth, partnerships, etc.)
-4. List up to 5 key negative developments (lawsuits, layoffs, regulatory issues, etc.)
-5. Score positive sentiment 0–10 (10 = very bullish news)
-6. Score negative sentiment 0–10 (10 = very bearish news, many negative articles)
-7. Give overall sentiment: bullish/bearish/neutral
-8. Write a 2-sentence sentiment summary
+Return:
+- positiveItems: up to 3 positive bullet points (short phrases)
+- negativeItems: up to 3 negative bullet points (short phrases)
+- positiveSentimentScore: 0-10
+- negativeSentimentScore: 0-10
+- overallSentiment: bullish/bearish/neutral
+- sentimentSummary: 1-2 sentences
 
-If no articles provided, give neutral scores of 5 and note limited data.`;
+If no news, use neutral scores of 5.`;
 
   const result = await withStructuredOutputFallback(NewsLLMOutputSchema, prompt, { temperature: 0.1 });
 
-  // Merge classified metadata back with raw articles (URL, publishedAt, source)
-  const enrichedArticles = articles.map((raw, i) => {
-    const classified = result.classifiedArticles[i];
-    return {
-      title: raw.title,
-      summary: classified?.summary ?? raw.description?.slice(0, 150) ?? "",
-      url: raw.url,
-      publishedAt: raw.publishedAt,
-      sentiment: classified?.sentiment ?? "neutral" as const,
-    };
-  });
+  // Build article list with generic neutral sentiment (no per-article LLM needed)
+  const enrichedArticles = articles.slice(0, 5).map((raw) => ({
+    title: raw.title,
+    summary: raw.description?.slice(0, 150) ?? raw.title,
+    url: raw.url,
+    publishedAt: raw.publishedAt,
+    sentiment: "neutral" as const,
+  }));
 
   const analysis = NewsAnalysisSchema.parse({
     articles: enrichedArticles,
