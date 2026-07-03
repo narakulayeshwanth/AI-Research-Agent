@@ -1,6 +1,6 @@
 /**
  * LLM provider — NVIDIA NIM (primary), OpenAI (fallback).
- * Uses Promise.race as a hard safety timeout on top of client-side timeout.
+ * Uses a faster 8B model to avoid timeouts on free-tier NVIDIA NIM.
  */
 import { ChatOpenAI } from "@langchain/openai";
 
@@ -19,24 +19,37 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   ]);
 }
 
+/** Returns true if the error is a permanent quota/billing failure (don't retry or fallback) */
+function isQuotaExhausted(err: unknown): boolean {
+  const msg = String((err as Error)?.message ?? "").toLowerCase();
+  return (
+    msg.includes("insufficient_quota") ||
+    msg.includes("exceeded your current quota") ||
+    msg.includes("billing") ||
+    msg.includes("no credits") ||
+    msg.includes("account is not active")
+  );
+}
+
 function getNvidiaLLM(options: LLMOptions = {}): ChatOpenAI | null {
   if (!process.env.NVIDIA_API_KEY) return null;
-  const { temperature = 0.1, maxTokens = 2048 } = options;
+  const { temperature = 0.1, maxTokens = 1024 } = options;
   return new ChatOpenAI({
     apiKey: process.env.NVIDIA_API_KEY,
     configuration: {
       baseURL: "https://integrate.api.nvidia.com/v1",
     },
-    model: process.env.NVIDIA_MODEL ?? "meta/llama-3.3-70b-instruct",
+    // Use 8B model — much faster than 70B, completes in ~5-10s vs 60s+
+    model: process.env.NVIDIA_MODEL ?? "meta/llama-3.1-8b-instruct",
     temperature,
     maxTokens,
-    timeout: 45000, // 45s client-side timeout
+    timeout: 45000,
   });
 }
 
 function getOpenAILLM(options: LLMOptions = {}): ChatOpenAI | null {
   if (!process.env.OPENAI_API_KEY) return null;
-  const { temperature = 0.1, maxTokens = 2048 } = options;
+  const { temperature = 0.1, maxTokens = 1024 } = options;
   return new ChatOpenAI({
     apiKey: process.env.OPENAI_API_KEY,
     model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
@@ -64,7 +77,7 @@ export function getLLM(options: LLMOptions = {}): ChatOpenAI {
 
 /**
  * withStructuredOutputFallback — tries NVIDIA NIM first, falls back to OpenAI.
- * A Promise.race hard timeout (55s) guarantees the call always resolves/rejects.
+ * Skips fallback if OpenAI has no billing quota (saves 45s wait time).
  */
 export async function withStructuredOutputFallback(
   schema: Parameters<ChatOpenAI["withStructuredOutput"]>[0],
@@ -78,35 +91,47 @@ export async function withStructuredOutputFallback(
   // ── Try NVIDIA NIM first (primary) ──────────────────────────
   if (nvidia) {
     try {
-      console.log("[LLM] Calling NVIDIA NIM (primary)...");
+      console.log("[LLM] Calling NVIDIA NIM (meta/llama-3.1-8b-instruct)...");
       const result = await withTimeout(
         nvidia.withStructuredOutput(schema).invoke(prompt),
-        55000,
+        45000,
         "NVIDIA NIM"
       );
       console.log("[LLM] NVIDIA NIM responded OK.");
       return result;
     } catch (err) {
       const msg = (err as Error)?.message ?? "";
-      if (openai) {
-        console.warn(`[LLM] NVIDIA failed (${msg.slice(0, 100)}) — falling back to OpenAI.`);
-        // fall through to OpenAI
+      if (!openai) throw err;
+      if (isQuotaExhausted(err)) {
+        // NVIDIA quota exhausted — try OpenAI
+        console.warn(`[LLM] NVIDIA quota exhausted — trying OpenAI fallback.`);
       } else {
-        throw err;
+        console.warn(`[LLM] NVIDIA failed (${msg.slice(0, 100)}) — falling back to OpenAI.`);
       }
+      // fall through to OpenAI
     }
   }
 
   // ── Fallback: OpenAI ─────────────────────────────────────────
   if (openai) {
-    console.log("[LLM] Calling OpenAI (fallback)...");
-    const result = await withTimeout(
-      openai.withStructuredOutput(schema).invoke(prompt),
-      55000,
-      "OpenAI"
-    );
-    console.log("[LLM] OpenAI responded OK.");
-    return result;
+    try {
+      console.log("[LLM] Calling OpenAI (fallback)...");
+      const result = await withTimeout(
+        openai.withStructuredOutput(schema).invoke(prompt),
+        45000,
+        "OpenAI"
+      );
+      console.log("[LLM] OpenAI responded OK.");
+      return result;
+    } catch (err) {
+      if (isQuotaExhausted(err)) {
+        throw new Error(
+          "Both LLM providers are unavailable: NVIDIA NIM failed and OpenAI has no billing quota. " +
+          "Please add OpenAI credits at platform.openai.com or check your NVIDIA API key."
+        );
+      }
+      throw err;
+    }
   }
 
   throw new Error(
