@@ -21,7 +21,7 @@ function getNvidiaLLM(options: LLMOptions = {}): ChatOpenAI | null {
     model: process.env.NVIDIA_MODEL ?? "meta/llama-3.3-70b-instruct",
     temperature,
     maxTokens,
-    timeout: 60000, // 60s hard timeout per LLM call
+    timeout: 30000, // 30s — fall back to OpenAI faster if NVIDIA hangs
   });
 }
 
@@ -33,7 +33,7 @@ function getOpenAILLM(options: LLMOptions = {}): ChatOpenAI | null {
     model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
     temperature,
     maxTokens,
-    timeout: 60000, // 60s hard timeout per LLM call
+    timeout: 30000, // 30s per LLM call
   });
 }
 

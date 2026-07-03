@@ -1,7 +1,7 @@
 import YahooFinanceClass from "yahoo-finance2";
 import { withCache } from "../lib/cache";
 
-// Instantiate yahoo-finance2 v3 (requires `new` in v3)
+// Instantiate yahoo-finance2 v3 — use new YahooFinance() per v3 API
 const yahooFinance = new YahooFinanceClass({ suppressNotices: ["yahooSurvey"] });
 
 export interface YahooFinanceData {
@@ -29,75 +29,77 @@ export interface YahooFinanceData {
   week52Low: number | null;
 }
 
+/**
+ * Fetch Yahoo Finance data using only endpoints that work without a crumb:
+ *  - quote()        → market cap, P/E, forward P/E, 52-week range, EPS, exchange, currency
+ *  - quoteSummary() → assetProfile only (sector, industry, description, employees, website, hq)
+ *
+ * NOTE: financialData / summaryDetail modules require a crumb, which gets rate-limited (429)
+ * on shared server IPs (Render). We intentionally avoid those modules here.
+ */
 async function _fetchYahooFinanceData(ticker: string): Promise<YahooFinanceData> {
-  try {
-    console.log(`[YahooFinance2] Fetching quoteSummary for ${ticker}...`);
+  console.log(`[YahooFinance2] Fetching data for ${ticker}...`);
 
-    const result = await yahooFinance.quoteSummary(ticker, {
-      modules: ["assetProfile", "financialData", "summaryDetail", "defaultKeyStatistics"],
-    });
+  // Run both calls in parallel for speed
+  const [quoteResult, profileResult] = await Promise.allSettled([
+    yahooFinance.quote(ticker),
+    yahooFinance.quoteSummary(ticker, { modules: ["assetProfile"] }),
+  ]);
 
-    const profile = result.assetProfile;
-    const financial = result.financialData;
-    const summary = result.summaryDetail;
-    const keyStats = result.defaultKeyStatistics;
+  const q = quoteResult.status === "fulfilled" ? quoteResult.value : null;
+  const p = profileResult.status === "fulfilled"
+    ? profileResult.value?.assetProfile
+    : null;
 
-    const name = String(profile?.longName ?? ticker);
-    const hq = [profile?.city, profile?.state, profile?.country]
-      .filter(Boolean)
-      .join(", ");
+  if (quoteResult.status === "rejected") {
+    console.warn(`[YahooFinance2] quote() failed for ${ticker}:`, quoteResult.reason?.message);
+  }
+  if (profileResult.status === "rejected") {
+    console.warn(`[YahooFinance2] quoteSummary(assetProfile) failed for ${ticker}:`, profileResult.reason?.message);
+  }
 
-    // Revenue growth comes as a decimal from Yahoo (e.g. 0.166 = 16.6%)
-    const revenueGrowthPct =
-      financial?.revenueGrowth != null
-        ? financial.revenueGrowth * 100
-        : null;
-
-    // Profit margin comes as a decimal (e.g. 0.122 = 12.2%)
-    const profitMarginPct =
-      financial?.profitMargins != null
-        ? financial.profitMargins * 100
-        : null;
-
-    // Compute net income from revenue × margin if not directly available
-    const revenue = financial?.totalRevenue ?? null;
-    const netIncome =
-      revenue != null && profitMarginPct != null
-        ? revenue * (profitMarginPct / 100)
-        : null;
-
-    console.log(
-      `[YahooFinance2] ${ticker}: sector=${profile?.sector}, mktCap=${summary?.marketCap}, revenue=${revenue}`
-    );
-
-    return {
-      ticker,
-      name,
-      description: profile?.longBusinessSummary ?? "",
-      sector: profile?.sector ?? "Unknown",
-      industry: profile?.industry ?? "Unknown",
-      exchange: String(keyStats?.exchange ?? ""),
-      currency: summary?.currency ?? "USD",
-      website: profile?.website ?? "",
-      headquarters: hq,
-      employees: profile?.fullTimeEmployees ?? null,
-      marketCap: summary?.marketCap ?? null,
-      revenue,
-      revenueGrowthPct,
-      netIncome,
-      profitMarginPct,
-      debtToEquity: financial?.debtToEquity ?? null,
-      peRatio: summary?.trailingPE ?? null,
-      forwardPE: summary?.forwardPE ?? null,
-      currentRatio: financial?.currentRatio ?? null,
-      beta: summary?.beta ?? null,
-      week52High: summary?.fiftyTwoWeekHigh ?? null,
-      week52Low: summary?.fiftyTwoWeekLow ?? null,
-    };
-  } catch (err) {
-    console.warn(`[YahooFinance2] Error for ${ticker}:`, (err as Error).message);
+  if (!q && !p) {
+    console.warn(`[YahooFinance2] Both calls failed for ${ticker}, returning empty data`);
     return emptyData(ticker);
   }
+
+  const name = String(q?.longName ?? q?.shortName ?? ticker);
+  const hq = [p?.city, p?.state, p?.country].filter(Boolean).join(", ");
+
+  // EPS × shares gives approximate revenue proxy — but prefer explicit data
+  // Market cap / P/E × margin ≈ revenue is too rough; omit revenue if unavailable
+  const marketCap = (q?.marketCap as number | undefined) ?? null;
+  const peRatio = (q?.trailingPE as number | undefined) ?? null;
+
+  console.log(
+    `[YahooFinance2] ${ticker}: name=${name}, sector=${p?.sector}, mktCap=${marketCap}, pe=${peRatio}`
+  );
+
+  return {
+    ticker,
+    name,
+    description: p?.longBusinessSummary ?? "",
+    sector: p?.sector ?? "Unknown",
+    industry: p?.industry ?? "Unknown",
+    exchange: String(q?.exchange ?? q?.fullExchangeName ?? ""),
+    currency: String(q?.currency ?? "USD"),
+    website: p?.website ?? "",
+    headquarters: hq,
+    employees: (p?.fullTimeEmployees as number | undefined) ?? null,
+    marketCap,
+    // Revenue and growth not available without crumb — LLM will fill in
+    revenue: null,
+    revenueGrowthPct: null,
+    netIncome: null,
+    profitMarginPct: null,
+    debtToEquity: null,
+    peRatio,
+    forwardPE: (q?.forwardPE as number | undefined) ?? null,
+    currentRatio: null,
+    beta: null,
+    week52High: (q?.fiftyTwoWeekHigh as number | undefined) ?? null,
+    week52Low: (q?.fiftyTwoWeekLow as number | undefined) ?? null,
+  };
 }
 
 function emptyData(ticker: string): YahooFinanceData {
@@ -212,14 +214,6 @@ const KNOWN_TICKERS: Record<string, string> = {
   "morgan stanley": "MS",
 };
 
-const HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36",
-  Accept: "application/json, text/plain, */*",
-  "Accept-Language": "en-US,en;q=0.9",
-  Referer: "https://finance.yahoo.com/",
-};
-
 /** Search for ticker symbol from company name */
 async function _searchTicker(companyName: string): Promise<string | null> {
   const upper = companyName.toUpperCase().trim();
@@ -237,21 +231,24 @@ async function _searchTicker(companyName: string): Promise<string | null> {
     return KNOWN_TICKERS[lower];
   }
 
-  // 3. yahoo-finance2 search (no rate limit)
+  // 3. yahoo-finance2 search (uses /v1/finance/search, no crumb needed)
   try {
     console.log(`[YahooFinance2] Searching for: ${companyName}`);
     const results = await yahooFinance.search(companyName);
     const quotes = results.quotes ?? [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const equity = quotes.find(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (q: any) => q.quoteType === "EQUITY" && q.symbol && !q.symbol.includes(".")
     );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = (equity as any)?.symbol ?? (quotes[0] as any)?.symbol ?? null;
     if (result) {
       console.log(`[YahooFinance2] Found ticker: ${result}`);
       return result;
     }
-  } catch (err: any) {
-    console.warn(`[YahooFinance2] Search failed (${err?.message}), trying REST fallback...`);
+  } catch (err: unknown) {
+    console.warn(`[YahooFinance2] Search failed (${(err as Error)?.message}), trying Alpha Vantage...`);
   }
 
   // 4. Alpha Vantage SYMBOL_SEARCH as last resort
@@ -273,14 +270,17 @@ async function searchViaAlphaVantage(keywords: string): Promise<string | null> {
       return null;
     }
     const matches = data?.bestMatches ?? [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const equity = matches.find(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (m: any) => m["4. region"] === "United States" && m["3. type"] === "Equity"
     );
-    const result = equity?.["1. symbol"] ?? null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = (equity as any)?.["1. symbol"] ?? null;
     if (result) console.log(`[AlphaVantage] Found ticker: ${result}`);
     return result;
-  } catch (err: any) {
-    console.warn("[AlphaVantage] Symbol search error:", err?.message);
+  } catch (err: unknown) {
+    console.warn("[AlphaVantage] Symbol search error:", (err as Error)?.message);
     return null;
   }
 }

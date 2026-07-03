@@ -45,13 +45,13 @@ export async function researchAgent(
   const yf = await fetchYahooFinanceData(ticker);
   const yfHasData = !!(yf.marketCap && yf.sector && yf.sector !== "Unknown");
 
-  console.log(`[ResearchAgent] ${ticker}: yfHasData=${yfHasData}, mktCap=${yf.marketCap}`);
+  console.log(`[ResearchAgent] ${ticker}: yfHasData=${yfHasData}, mktCap=${yf.marketCap}, sector=${yf.sector}`);
 
   // ── 3. LLM enrichment (competitors, thesis + fallback financials) ──
   const prompt = `You are a financial research analyst. Provide structured information about the company with ticker: ${ticker} (user searched: "${company}").
 
 ${yfHasData ? `
-YAHOO FINANCE DATA (AVAILABLE — use this as ground truth for fields below):
+YAHOO FINANCE DATA (AVAILABLE — name, market cap, and P/E ratio are confirmed real data):
 - Company: ${yf.name}
 - Sector: ${yf.sector}
 - Industry: ${yf.industry}
@@ -59,41 +59,39 @@ YAHOO FINANCE DATA (AVAILABLE — use this as ground truth for fields below):
 - Website: ${yf.website}
 - Description: ${yf.description?.slice(0, 300) ?? "N/A"}
 - Market Cap: $${yf.marketCap ? (yf.marketCap / 1e9).toFixed(1) + "B" : "N/A"}
-- Revenue (TTM): $${yf.revenue ? (yf.revenue / 1e9).toFixed(1) + "B" : "N/A"}
-- Revenue Growth: ${yf.revenueGrowthPct?.toFixed(1) ?? "N/A"}%
-- Net Margin: ${yf.profitMarginPct?.toFixed(1) ?? "N/A"}%
 - P/E Ratio: ${yf.peRatio?.toFixed(1) ?? "N/A"}x
+- Forward P/E: ${yf.forwardPE?.toFixed(1) ?? "N/A"}x
+- 52-Week High/Low: $${yf.week52High?.toFixed(0) ?? "N/A"} / $${yf.week52Low?.toFixed(0) ?? "N/A"}
 - Employees: ${yf.employees?.toLocaleString() ?? "N/A"}
-- D/E Ratio: ${yf.debtToEquity?.toFixed(2) ?? "N/A"}
 
-Since financial data is available, set all "estimated*" fields to null.
+Note: Revenue, margins, D/E ratio, and current ratio are NOT available from Yahoo Finance here.
+You MUST provide your best estimates for those financial fields below.
 ` : `
-YAHOO FINANCE: No data available. Use your training knowledge to provide REAL estimated financial data for ${ticker}.
-This is CRITICAL — provide your best estimates for the financial fields below.
+YAHOO FINANCE: Unavailable for this request. Use your training knowledge to provide REAL estimated financial data for ${ticker}.
 `}
 
 REQUIRED OUTPUT:
-1. name: Full company name (use Yahoo Finance data if available)
+1. name: Full company name${yfHasData ? " (use: "+ yf.name +")" : ""}
 2. description: 2-3 sentence company overview
 3. headquarters: City, State, Country
 4. website: Official URL
 5. exchange: NYSE/NASDAQ/etc.
-6. sector: GICS sector classification
+6. sector: GICS sector
 7. industry: Specific industry
 8. competitors: 3-5 main publicly traded competitors (ticker symbols preferred)
 9. investmentThesisSummary: 1-sentence core investment thesis
 
-FINANCIAL ESTIMATES (only needed if Yahoo Finance data is missing above):
-10. estimatedMarketCapBillions: null if Yahoo data available, else provide estimate
-11. estimatedRevenueBillions: null if Yahoo data available, else provide estimate
-12. estimatedRevenueGrowthPct: null if Yahoo data available, else provide estimate
-13. estimatedNetMarginPct: null if Yahoo data available, else provide estimate
-14. estimatedPERatio: null if Yahoo data available, else provide estimate
-15. estimatedDebtToEquity: null if Yahoo data available, else provide estimate
-16. estimatedCurrentRatio: null if Yahoo data available, else provide estimate
-17. estimatedEmployees: null if Yahoo data available, else provide estimate
+FINANCIAL ESTIMATES (provide realistic estimates based on your knowledge — these are critical for scoring):
+10. estimatedMarketCapBillions: ${yfHasData && yf.marketCap ? "null (use Yahoo Finance: $"+(yf.marketCap/1e9).toFixed(1)+"B)" : "your best estimate in billions"}
+11. estimatedRevenueBillions: Annual TTM revenue in billions USD
+12. estimatedRevenueGrowthPct: YoY revenue growth %
+13. estimatedNetMarginPct: Net profit margin %
+14. estimatedPERatio: ${yfHasData && yf.peRatio ? "null (use Yahoo Finance: "+yf.peRatio.toFixed(1)+"x)" : "trailing P/E ratio"}
+15. estimatedDebtToEquity: Debt-to-equity ratio
+16. estimatedCurrentRatio: Current ratio
+17. estimatedEmployees: ${yfHasData && yf.employees ? "null (use Yahoo Finance: "+yf.employees.toLocaleString()+")" : "full-time employee count"}
 
-Be accurate. Use null only for genuinely unknown metrics.`;
+Be accurate and specific. Do not use null unless you genuinely have no knowledge of the metric.`;
 
   const enriched = await withStructuredOutputFallback(LLMEnrichSchema, prompt, { temperature: 0.1 });
 
@@ -170,7 +168,7 @@ Be accurate. Use null only for genuinely unknown metrics.`;
     exchange: yf.exchange || enriched.exchange,
     currency: yf.currency || "USD",
     sources: yfHasData
-      ? ["Yahoo Finance (yahoo-finance2)", "LLM Enrichment"]
+      ? ["Yahoo Finance (quote + assetProfile)", "LLM Enrichment"]
       : ["LLM Enrichment (Yahoo Finance unavailable)"],
   });
 
