@@ -128,7 +128,7 @@ export const InvestmentDecisionSchema = z.object({
   reasoning: z.string(),
   keyFactors: z.array(z.string()),
   timeHorizon: z.string(),
-  targetPrice: z.string().optional(),
+  targetPrice: z.string().nullable(),
   sources: z.array(z.string()),
 });
 export type InvestmentDecision = z.infer<typeof InvestmentDecisionSchema>;
@@ -144,8 +144,8 @@ export const AnalystMemoSchema = z.object({
   investmentRecommendation: z.string(),
   conclusion: z.string(),
   analystNote: z.string(),
-  dateGenerated: z.string().optional(), // set by code, not LLM
-  sources: z.array(z.string()).optional(), // set by code, not LLM
+  dateGenerated: z.string().nullable(),
+  sources: z.array(z.string()).nullable(),
 });
 export type AnalystMemo = z.infer<typeof AnalystMemoSchema>;
 

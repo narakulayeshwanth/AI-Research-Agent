@@ -17,6 +17,7 @@ Return:
 - reasoning: 2-3 sentences
 - keyFactors: 3-4 short bullet points
 - timeHorizon: e.g. "12-18 months"
+- targetPrice: null
 - sources: ["Financial Analysis","News Sentiment","Risk Assessment","Bull-Bear Analysis","NVIDIA NIM LLM"]`;
 
   const decision = await withStructuredOutputFallback(InvestmentDecisionSchema, prompt, { temperature: 0.05 });
