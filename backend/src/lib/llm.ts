@@ -90,25 +90,34 @@ export async function withStructuredOutputFallback(
 
   // ── Try NVIDIA NIM first (primary) ──────────────────────────
   if (nvidia) {
-    try {
-      console.log("[LLM] Calling NVIDIA NIM (meta/llama-3.1-8b-instruct)...");
-      const result = await withTimeout(
-        nvidia.withStructuredOutput(schema).invoke(prompt),
-        45000,
-        "NVIDIA NIM"
-      );
-      console.log("[LLM] NVIDIA NIM responded OK.");
-      return result;
-    } catch (err) {
-      const msg = (err as Error)?.message ?? "";
-      if (!openai) throw err;
-      if (isQuotaExhausted(err)) {
-        // NVIDIA quota exhausted — try OpenAI
-        console.warn(`[LLM] NVIDIA quota exhausted — trying OpenAI fallback.`);
-      } else {
-        console.warn(`[LLM] NVIDIA failed (${msg.slice(0, 100)}) — falling back to OpenAI.`);
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        console.log(`[LLM] Calling NVIDIA NIM (meta/llama-3.1-8b-instruct) attempt ${attempt}...`);
+        const result = await withTimeout(
+          nvidia.withStructuredOutput(schema).invoke(prompt),
+          45000,
+          "NVIDIA NIM"
+        );
+        console.log("[LLM] NVIDIA NIM responded OK.");
+        return result;
+      } catch (err) {
+        const msg = (err as Error)?.message ?? "";
+        if (attempt === 1 && openai === null) {
+          // Only one provider — retry after 2s
+          console.warn(`[LLM] NVIDIA attempt 1 failed (${msg.slice(0, 80)}), retrying in 2s...`);
+          await new Promise(r => setTimeout(r, 2000));
+          continue;
+        }
+        if (attempt === 1) {
+          console.warn(`[LLM] NVIDIA attempt 1 failed (${msg.slice(0, 80)}), retrying in 2s...`);
+          await new Promise(r => setTimeout(r, 2000));
+          continue;
+        }
+        // attempt 2 failed — fall through to OpenAI
+        if (!openai) throw err;
+        console.warn(`[LLM] NVIDIA failed after 2 attempts (${msg.slice(0, 80)}) — falling back to OpenAI.`);
+        break;
       }
-      // fall through to OpenAI
     }
   }
 
