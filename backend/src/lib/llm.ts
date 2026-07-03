@@ -21,6 +21,7 @@ function getNvidiaLLM(options: LLMOptions = {}): ChatOpenAI | null {
     model: process.env.NVIDIA_MODEL ?? "meta/llama-3.3-70b-instruct",
     temperature,
     maxTokens,
+    timeout: 60000, // 60s hard timeout per LLM call
   });
 }
 
@@ -32,6 +33,7 @@ function getOpenAILLM(options: LLMOptions = {}): ChatOpenAI | null {
     model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
     temperature,
     maxTokens,
+    timeout: 60000, // 60s hard timeout per LLM call
   });
 }
 
@@ -54,10 +56,10 @@ export function getLLM(options: LLMOptions = {}): ChatOpenAI {
 /**
  * isRateLimitError — checks if an error is a 429 / rate limit response.
  */
-function isRateLimitError(err: unknown): boolean {
+function shouldFallbackToOpenAI(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const e = err as Record<string, unknown>;
-  // LangChain wraps HTTP errors — check status, code, and message
+  // Rate limit errors (429)
   if (e["status"] === 429 || e["statusCode"] === 429) return true;
   const msg = String(e["message"] ?? "").toLowerCase();
   return (
@@ -65,7 +67,16 @@ function isRateLimitError(err: unknown): boolean {
     msg.includes("rate limit") ||
     msg.includes("rate_limit") ||
     msg.includes("too many requests") ||
-    msg.includes("model_rate_limit")
+    msg.includes("model_rate_limit") ||
+    msg.includes("timeout") ||
+    msg.includes("timed out") ||
+    msg.includes("econnreset") ||
+    msg.includes("econnrefused") ||
+    msg.includes("socket hang up") ||
+    msg.includes("network") ||
+    msg.includes("502") ||
+    msg.includes("503") ||
+    msg.includes("504")
   );
 }
 
@@ -91,13 +102,16 @@ export async function withStructuredOutputFallback(
       const result = await nvidia.withStructuredOutput(schema).invoke(prompt);
       return result;
     } catch (err) {
-      if (isRateLimitError(err) && openai) {
+      if (shouldFallbackToOpenAI(err) && openai) {
         console.warn(
-          "[LLM] NVIDIA rate limited (429) — falling back to OpenAI for this call."
+          `[LLM] NVIDIA failed (${(err as Error)?.message?.slice(0, 80)}) — falling back to OpenAI.`
         );
         // fall through to OpenAI below
+      } else if (!openai) {
+        throw err; // no fallback available
       } else {
-        throw err; // non-rate-limit error, propagate
+        console.warn(`[LLM] NVIDIA error — trying OpenAI fallback: ${(err as Error)?.message?.slice(0, 80)}`);
+        // fall through to OpenAI for any error when fallback exists
       }
     }
   }
