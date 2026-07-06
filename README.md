@@ -55,7 +55,7 @@ NEWS_API_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ALPHA_VANTAGE_API_KEY=XXXXXXXXXXXXXXXXXX
 
 # App
-NEXT_PUBLIC_APP_URL=http://localhost:3000
+NEXT_PUBLIC_APP_URL=https://ai-research-agent-virid.vercel.app/
 ```
 
 | Variable | Where to get it | Required? |
