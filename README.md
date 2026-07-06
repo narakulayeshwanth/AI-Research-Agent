@@ -74,7 +74,7 @@ NEXT_PUBLIC_APP_URL=https://ai-research-agent-virid.vercel.app/
 npm run dev
 ```
 
-Open http://localhost:3000. Type any company name in the search bar and click **Analyze**.
+Open https://ai-research-agent-virid.vercel.app/. Type any company name in the search bar and click **Analyze**.
 
 ### 4 - Build for production
 
