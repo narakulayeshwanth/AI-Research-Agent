@@ -125,8 +125,8 @@ Use null only if you genuinely have no knowledge of the metric.`;
     exchange: yf.exchange || enriched.exchange || "",
     currency: yf.currency || "USD",
     sources: yfHasMarketCap
-      ? ["Yahoo Finance (quote)", "NVIDIA NIM LLM"]
-      : ["NVIDIA NIM LLM"],
+      ? ["Yahoo Finance (quote)", "LLM (Groq / NVIDIA NIM)"]
+      : ["LLM (Groq / NVIDIA NIM)"],
   });
 
   return {
