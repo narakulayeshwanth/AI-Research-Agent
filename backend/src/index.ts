@@ -42,7 +42,16 @@ app.use(express.json());
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", service: "ai-investment-agent-backend" });
+  res.json({
+    status: "ok",
+    service: "ai-investment-agent-backend",
+    llm: {
+      groq: !!process.env.GROQ_API_KEY,
+      groqModel: process.env.GROQ_MODEL ?? "(not set)",
+      nvidia: !!process.env.NVIDIA_API_KEY,
+      openai: !!process.env.OPENAI_API_KEY,
+    },
+  });
 });
 
 // ── API Routes ────────────────────────────────────────────────────────────────
